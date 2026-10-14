@@ -1,85 +1,147 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { Halo, ParticleField, easeOutCubic, type EffectProps, type ParticleSpec } from '../shared'
+import {
+  Halo,
+  MeshParticleField,
+  easeOutCubic,
+  makeFlameGeometry,
+  useGeometry,
+  type EffectProps,
+  type ParticleSpec,
+} from '../shared'
 
 /**
- * Fire plume: a small rising fireball while charging, a directional jet on release, and
- * drifting embers on dissipation. Unlike the other jutsu this does not travel; it streams from
- * where it was released.
+ * Anime-style 3D fire. Every flame is a real teardrop mesh, flat-coloured (no lighting) with a
+ * dark inverted-hull outline: the classic cel-shaded look. Three stacked layers (red body, orange
+ * middle, yellow-white core) billow outward along the finger direction and shrink away.
+ * Colours are fully saturated on purpose.
+ *
+ * The jet follows the hand: it streams from the palm along the live finger direction, so
+ * rotating your hand sweeps the fire. A small plume licks along the fingers while charging.
  */
+
+/** Billow: grows fast, holds, then shrinks away. Gives the lumpy "cartoon fire" silhouette. */
+const billow = (t: number) => (0.35 + 1.15 * Math.sin(Math.min(1, t * 1.6) * Math.PI * 0.5)) * (1 - t * t * 0.9)
+
 export function Katon({ fx, ctx, quality }: EffectProps) {
   const halo = useRef<THREE.Group>(null)
   const haloScale = useRef(0)
+  const flame = useGeometry(makeFlameGeometry)
+  const jetSrc = useMemo(() => new THREE.Vector3(), [])
 
-  const flame = useMemo<ParticleSpec>(
+  /** Shared spawn: `spread`, `speedMul` and `jitter` let each layer be tighter or looser than the body. */
+  const makeSpawn = (spread: number, speedMul: number, jitter: number): ParticleSpec['spawn'] => {
+    const d = new THREE.Vector3()
+    return (o) => {
+      const jet = fx.phase === 'released'
+      // Cone of directions around the live finger direction.
+      d.randomDirection().multiplyScalar((jet ? 0.22 : 0.5) * spread).add(ctx.up).normalize()
+      const speed = (jet ? 6.5 + Math.random() * 5 : 1.1 + Math.random() * 1.6) * speedMul
+      const r = (jet ? 0.2 : 0.3 * fx.handScale) * jitter
+      o.x = jetSrc.x + (Math.random() - 0.5) * r
+      o.y = jetSrc.y + (Math.random() - 0.5) * r
+      o.z = jetSrc.z + (Math.random() - 0.5) * r
+      o.vx = d.x * speed
+      o.vy = d.y * speed
+      o.vz = d.z * speed
+    }
+  }
+
+  // Lumpy wobble across the flow so the plume writhes rather than flies straight.
+  const writhe: ParticleSpec['force'] = (p, _o, dt) => {
+    p.vx += Math.sin(p.x * 2.3 + p.y * 3.1) * 2.5 * dt
+    p.vy += Math.cos(p.x * 3.3 - p.y * 2.1) * 4 * dt
+  }
+
+  const body = useMemo<ParticleSpec>(
     () => ({
-      count: Math.round(900 * quality),
-      size: 0.5,
-      from: '#fde047',
-      to: '#b91c1c',
-      life: [0.5, 1.1],
-      drag: 0.6,
-      gravity: [0, 1.6, 0], // flames rise
-      spawn: (o) => {
-        const jet = fx.phase === 'released'
-        const src = jet ? ctx.launch : ctx.anchor
-        const spread = (Math.random() - 0.5) * (jet ? 0.5 : 1.4)
-        // Rotate the base direction (aim for the jet, straight up otherwise) by a random spread.
-        const bx = jet ? ctx.dir.x : 0
-        const by = jet ? ctx.dir.y : 1
-        const c = Math.cos(spread)
-        const s = Math.sin(spread)
-        const dx = bx * c - by * s
-        const dy = bx * s + by * c
-        const speed = jet ? 6 + Math.random() * 5 : 0.8 + Math.random() * 1.6
-        const r = jet ? 0.15 : 0.25 * fx.handScale
-        o.x = src.x + (Math.random() - 0.5) * r
-        o.y = src.y + (Math.random() - 0.5) * r
-        o.z = src.z + (Math.random() - 0.5) * 0.4
-        o.vx = dx * speed
-        o.vy = dy * speed
-        o.vz = (Math.random() - 0.5) * 1.2
-      },
+      count: Math.round(140 * quality),
+      size: 0.7,
+      from: '#ff7a00',
+      mid: '#ff3300',
+      to: '#c00000',
+      life: [0.5, 1.0],
+      drag: 0.7,
+      gravity: [0, 1.2, 0],
+      sizeOverLife: billow,
+      spawn: makeSpawn(0.9, 1, 1.2),
+      force: writhe,
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [quality, fx, ctx],
+  )
+  const middle = useMemo<ParticleSpec>(
+    () => ({
+      count: Math.round(130 * quality),
+      size: 0.55,
+      from: '#ffc400',
+      mid: '#ff8a00',
+      to: '#ff3a00',
+      life: [0.4, 0.85],
+      drag: 0.7,
+      gravity: [0, 1.4, 0],
+      sizeOverLife: billow,
+      spawn: makeSpawn(0.6, 1.05, 0.9),
+      force: writhe,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [quality, fx, ctx],
+  )
+  const core = useMemo<ParticleSpec>(
+    () => ({
+      count: Math.round(100 * quality),
+      size: 0.38,
+      from: '#fffbc0',
+      mid: '#ffee00',
+      to: '#ffa800',
+      life: [0.3, 0.7],
+      drag: 0.8,
+      gravity: [0, 1.6, 0],
+      sizeOverLife: billow,
+      spawn: makeSpawn(0.35, 1.1, 0.5),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [quality, fx, ctx],
   )
 
   const emit = () => {
     switch (fx.phase) {
       case 'charging':
-        return easeOutCubic(fx.charge) * 0.3 * fx.visibility
+        return easeOutCubic(fx.charge) * 0.35 * fx.visibility
       case 'ready':
-        return 0.35 * fx.visibility
+        return 0.4 * fx.visibility
       case 'released':
         return 1
       case 'impact':
-        return Math.max(0, 0.3 * (1 - fx.phaseTime / 0.45)) // dissipating embers
+        return Math.max(0, 0.35 * (1 - fx.phaseTime / 0.5)) // dissipating embers
       default:
         return 0
     }
   }
 
   useFrame((state, dt) => {
-    const target = emit()
-    haloScale.current += (target - haloScale.current) * Math.min(1, dt * 10)
+    // The jet is rooted just in front of the palm and follows the hand live.
+    jetSrc.copy(ctx.anchor).addScaledVector(ctx.up, 0.5 * fx.handScale)
+
+    haloScale.current += (emit() - haloScale.current) * Math.min(1, dt * 10)
     const g = halo.current
     if (!g) return
-    const src = fx.phase === 'released' || fx.phase === 'impact' ? ctx.launch : ctx.anchor
-    // Halo sits at the source and leans along the jet while firing.
-    const lead = fx.phase === 'released' ? 1.2 : 0
-    g.position.set(src.x + ctx.dir.x * lead, src.y + ctx.dir.y * lead, 0)
+    const lead = fx.phase === 'released' ? 1.5 : 0
+    g.position.copy(jetSrc).addScaledVector(ctx.up, lead)
     const flicker = 0.85 + Math.sin(state.clock.elapsedTime * 40) * 0.1 + Math.random() * 0.1
-    g.scale.setScalar(Math.max(1e-4, haloScale.current * 3.2 * flicker * fx.handScale))
+    g.scale.setScalar(Math.max(1e-4, haloScale.current * 4.2 * flicker * fx.handScale))
     g.visible = haloScale.current > 0.02
   })
 
   return (
     <>
       <group ref={halo} visible={false}>
-        <Halo color="#fb923c" size={1} />
+        <Halo color="#ff4d00" size={1} />
       </group>
-      <ParticleField spec={flame} origin={ctx.anchor} emit={emit} />
+      <MeshParticleField spec={body} geometry={flame} origin={jetSrc} emit={emit} orient stretch={0.1} outline="#4a0500" />
+      <MeshParticleField spec={middle} geometry={flame} origin={jetSrc} emit={emit} orient stretch={0.1} outline="#7a1800" />
+      <MeshParticleField spec={core} geometry={flame} origin={jetSrc} emit={emit} orient stretch={0.1} outline="#a84300" />
     </>
   )
 }

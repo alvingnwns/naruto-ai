@@ -84,6 +84,20 @@ Recognition pipeline:
 3. **Sequence engine** (`sequence.ts`): hold time, flicker grace, cooldown, no repeat while a
    pose is held, timeout, reset, suffix-matching against each jutsu's sequence.
 
+Hand rotation: `pose.ts` derives the palm frame from the landmarks (finger direction =
+wrist→middle knuckle; palm normal from the knuckle line, forced to face the viewer because a
+single camera can't tell palm from back without handedness). The scene smooths it into a
+quaternion; every effect lives in that frame, so tilting/rolling your hand rotates the Rasengan
+rings, the Chidori spike, the Rasenshuriken disc, and sweeps the Katon jet. Release fires along
+the finger direction (or the flick direction). Out-of-plane tilt uses MediaPipe's noisy relative
+depth, so treat it as approximate. In Demo mode the pointer drives a simulated roll/pitch.
+
+Effects are real 3D geometry with fresnel-rim glow: swirl-shader orb + instanced orbiting beads
+(Rasengan), extruded bevelled blades + tori wind bands + instanced streaks (Rasenshuriken),
+instanced-cylinder forked lightning in 3D (Chidori), and instanced teardrop flame meshes with
+inverted-hull outlines for a cel-shaded look (Katon). Soft sprite halos are used only as a bloom
+stand-in around the geometry.
+
 Performance: the frame loop works in refs; React gets a snapshot only when something visible
 changes (quantised confidence/hold progress). Particles are CPU-updated into one draw call per
 field. The HUD shows measured render and tracking FPS.
@@ -130,6 +144,8 @@ required. Serve over HTTPS so the browser permits camera access.
 - No temporal/ML model is trained or shipped. A sequence model (e.g. LSTM over landmark
   windows) would be a possible future extension.
 - Sound is synthesised with WebAudio, opt-in, and off by default.
-- Glow is additive sprites rather than post-process bloom (bloom is unreliable on transparent
-  canvases and costs fill-rate).
+- Glow is fresnel-shaded geometry plus additive halo sprites rather than post-process bloom
+  (bloom is unreliable on transparent canvases and costs fill-rate).
+- Hand-rotation following is verified in Demo mode (simulated pose) and by unit tests of the pose
+  math; with a real hand it depends on MediaPipe's depth estimate and is untested.
 - No ESLint is configured; `npm run typecheck` is the static check.

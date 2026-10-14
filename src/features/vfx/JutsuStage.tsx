@@ -23,11 +23,17 @@ function Scene({ fx, jutsu, quality }: { fx: FxState; jutsu: JutsuId | null; qua
       launch: new THREE.Vector3(),
       pos: new THREE.Vector3(),
       dir: new THREE.Vector3(0, 1, 0),
+      quat: new THREE.Quaternion(),
+      up: new THREE.Vector3(0, 1, 0),
     }),
     [],
   )
   const prevPhase = useRef(fx.phase)
   const target = useMemo(() => new THREE.Vector3(), [])
+  const basis = useMemo(
+    () => ({ x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3(), m: new THREE.Matrix4(), q: new THREE.Quaternion() }),
+    [],
+  )
 
   // Priority -1: derive world-space state before the effects' own useFrame callbacks read it.
   useFrame((_, dt) => {
@@ -35,6 +41,16 @@ function Scene({ fx, jutsu, quality }: { fx: FxState; jutsu: JutsuId | null; qua
     target.set(w.x, w.y, 0)
     // Frame-rate independent smoothing hides landmark jitter without adding noticeable lag.
     ctx.anchor.lerp(target, 1 - Math.exp(-dt * 18))
+
+    // Hand orientation -> quaternion. Local +Y = fingers, +Z = palm normal, +X = Y x Z.
+    // Smoothed more heavily than position: MediaPipe's relative depth (z) is noisy.
+    basis.y.set(fx.handUp.x, fx.handUp.y, fx.handUp.z)
+    basis.z.set(fx.handNormal.x, fx.handNormal.y, fx.handNormal.z)
+    basis.x.crossVectors(basis.y, basis.z)
+    basis.q.setFromRotationMatrix(basis.m.makeBasis(basis.x, basis.y, basis.z))
+    const rk = 1 - Math.exp(-dt * 12)
+    ctx.quat.slerp(basis.q, rk)
+    ctx.up.lerp(basis.y, rk).normalize()
 
     if (fx.phase === 'released' && prevPhase.current !== 'released') {
       ctx.launch.copy(ctx.anchor)

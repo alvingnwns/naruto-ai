@@ -7,6 +7,7 @@ import { playSfx, setMuted } from '../lib/audio'
 import type { CameraApi } from '../features/camera/useCamera'
 import { classifySign } from '../features/gesture-recognition/classify'
 import { extractHandFeatures, type HandFeatures, type Landmark } from '../features/gesture-recognition/features'
+import { IDENTITY_POSE, extractHandPose, poseFromEuler } from '../features/gesture-recognition/pose'
 import { SequenceEngine } from '../features/gesture-recognition/sequence'
 import { createHandTracker, type HandTracker } from '../features/hand-tracking/handTracker'
 import { IDLE_STATE, activate, chargeLevel, release, tick, type JutsuPhase, type JutsuState } from '../features/jutsu-system/lifecycle'
@@ -91,6 +92,8 @@ export function useExperience(opts: Options) {
     handScale: 1,
     visibility: 1,
     aim: { x: 1, y: 0.1 },
+    handUp: { ...IDENTITY_POSE.up },
+    handNormal: { ...IDENTITY_POSE.normal },
   }).current
 
   const engine = useRef(new SequenceEngine()).current
@@ -181,6 +184,14 @@ export function useExperience(opts: Options) {
       if (aim) {
         fx.aim.x = aim.x
         fx.aim.y = aim.y
+      } else {
+        // Fire along the direction the fingers point (falls back to the default aim if the hand
+        // is pointing mostly at/away from the camera).
+        const len = Math.hypot(fx.handUp.x, fx.handUp.y)
+        if (len > 0.3) {
+          fx.aim.x = fx.handUp.x / len
+          fx.aim.y = fx.handUp.y / len
+        }
       }
       setLifecycle(release(lifecycle.current, now))
     }
@@ -229,6 +240,11 @@ export function useExperience(opts: Options) {
           fx.anchor.x = d.x
           fx.anchor.y = d.y
           handScale += (handScaleFromSize(features[0].handSize) - handScale) * Math.min(1, dtSec * 6)
+          const pose = extractHandPose(lastLandmarks[0], o.camera.aspect)
+          if (pose) {
+            Object.assign(fx.handUp, pose.up)
+            Object.assign(fx.handNormal, pose.normal)
+          }
           fx.handScale = handScale
           if (newDetection) {
             trail.push({ t: now, x: d.x * o.camera.aspect, y: d.y })
@@ -240,6 +256,10 @@ export function useExperience(opts: Options) {
         fx.anchor.y = demoAnchor.current.y
         fx.handScale = 1
         handsCount = 1
+        // Simulated hand rotation: pointer x rolls the "hand", pointer y pitches it.
+        const sp = poseFromEuler((demoAnchor.current.x - 0.5) * 1.6, (demoAnchor.current.y - 0.55) * 1.0)
+        Object.assign(fx.handUp, sp.up)
+        Object.assign(fx.handNormal, sp.normal)
         const s = sim.current
         if (s) {
           const slot = o.settings.holdMs + 150 + SIM_GAP_MS

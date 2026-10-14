@@ -1,91 +1,191 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { EnergyOrb, Halo, ImpactFx, ParticleField, presence, type EffectProps, type ParticleSpec } from '../shared'
+import {
+  EnergyOrb,
+  Halo,
+  ImpactFx,
+  MeshParticleField,
+  makeStreakGeometry,
+  presence,
+  useGeometry,
+  useGlowMaterial,
+  type EffectProps,
+  type ParticleSpec,
+} from '../shared'
 
-const ARCS = 7
-const SEGMENTS = 9
-const COPIES = 3 // each arc is drawn 3x with a tiny offset: 1px GL lines otherwise look too thin
+const ARCS = 12
+const SEGMENTS = 8
+const BRANCHES = 2 // forks per bolt
+const BRANCH_SEGMENTS = 4
+const SEGS_PER_ARC = SEGMENTS + BRANCHES * BRANCH_SEGMENTS
+const TOTAL = ARCS * SEGS_PER_ARC
+const REFRESH = 0.03 // seconds between bolt re-rolls: fast enough to read as crackling
 
-/** Jagged lightning bolts regenerated ~20x/sec, radiating from the palm. */
-function Arcs({ fx, ctx }: Pick<EffectProps, 'fx' | 'ctx'>) {
-  const lines = useRef<THREE.LineSegments>(null)
+const _m = new THREE.Matrix4()
+const _q = new THREE.Quaternion()
+const _mid = new THREE.Vector3()
+const _d = new THREE.Vector3()
+const _s = new THREE.Vector3()
+const _Y = new THREE.Vector3(0, 1, 0)
+const _dir = new THREE.Vector3()
+const _u = new THREE.Vector3()
+const _w = new THREE.Vector3()
+const _bias = new THREE.Vector3(0, 0.9, 0.2)
+
+type P3 = THREE.Vector3
+
+/**
+ * Forked lightning built from real 3D tubes (instanced thin cylinders, two layers: a hot white
+ * core and a wider blue glow). Bolts radiate in all three dimensions, biased towards the
+ * fingertips, and are re-rolled ~33x/sec. Lives in the hand's local frame.
+ */
+function LightningBolts({ fx }: { fx: EffectProps['fx'] }) {
+  const root = useRef<THREE.Group>(null)
   const timer = useRef(0)
-  const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ARCS * COPIES * SEGMENTS * 2 * 3), 3))
-    return g
-  }, [])
-  useEffect(() => () => geometry.dispose(), [geometry])
+  const tube = useGeometry(() => new THREE.CylinderGeometry(1, 1, 1, 6, 1, true))
+
+  const built = useMemo(() => {
+    const coreMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    const glowMat = new THREE.MeshBasicMaterial({ color: '#4f8dff', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })
+    const core = new THREE.InstancedMesh(tube, coreMat, TOTAL)
+    const glow = new THREE.InstancedMesh(tube, glowMat, TOTAL)
+    for (const m of [core, glow]) {
+      m.frustumCulled = false
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    }
+    return { core, glow, coreMat, glowMat }
+  }, [tube])
+
+  useEffect(
+    () => () => {
+      built.core.dispose()
+      built.glow.dispose()
+      built.coreMat.dispose()
+      built.glowMat.dispose()
+    },
+    [built],
+  )
 
   useFrame((_, dt) => {
-    const l = lines.current
-    if (!l) return
     const k = presence(fx)
-    l.visible = k > 0.01
-    l.position.copy(ctx.pos)
+    const g = root.current
+    if (!g) return
+    g.visible = k > 0.01
     timer.current += dt
-    if (timer.current < 0.05 || !l.visible) return
+    if (timer.current < REFRESH || !g.visible) return
     timer.current = 0
 
-    const pos = geometry.attributes.position as THREE.BufferAttribute
-    const reach = (fx.phase === 'released' ? 2.6 : 1.5) * fx.handScale * k
-    let v = 0
+    const { core, glow } = built
+    const reach = (fx.phase === 'released' ? 3.4 : 2.4) * fx.handScale
+    let n = 0
+    // Writes one cylinder spanning a->b into both layers.
+    const seg = (a: P3, b: P3, r: number) => {
+      _d.subVectors(b, a)
+      const len = _d.length()
+      if (len < 1e-5) return
+      _mid.addVectors(a, b).multiplyScalar(0.5)
+      _q.setFromUnitVectors(_Y, _d.multiplyScalar(1 / len))
+      core.setMatrixAt(n, _m.compose(_mid, _q, _s.set(r, len, r)))
+      glow.setMatrixAt(n, _m.compose(_mid, _q, _s.set(r * 3.2, len, r * 3.2)))
+      n++
+    }
+
     for (let a = 0; a < ARCS; a++) {
-      const ang = Math.random() * Math.PI * 2
-      const dx = Math.cos(ang)
-      const dy = Math.sin(ang)
-      const len = reach * (0.5 + Math.random() * 0.7)
-      // Midpoint-style jitter perpendicular to the bolt direction.
-      const pts: [number, number][] = []
+      // Random 3D direction biased towards the fingertips (+Y of the hand frame).
+      _dir.randomDirection().add(_bias).normalize()
+      const len = reach * (Math.random() < 0.18 ? 1.5 + Math.random() * 0.6 : 0.4 + Math.random() * 0.7)
+      // Two axes perpendicular to the bolt for 3D jitter.
+      _u.crossVectors(_dir, _w.randomDirection()).normalize()
+      _w.crossVectors(_dir, _u)
+
+      const pts: P3[] = []
       for (let s = 0; s <= SEGMENTS; s++) {
         const t = s / SEGMENTS
-        const jag = (Math.random() - 0.5) * 0.45 * Math.sin(Math.PI * t) * len
-        pts.push([dx * len * t - dy * jag, dy * len * t + dx * jag])
+        const amp = 0.5 * Math.sin(Math.PI * t) * len
+        pts.push(
+          new THREE.Vector3()
+            .copy(_dir)
+            .multiplyScalar(len * t)
+            .addScaledVector(_u, (Math.random() - 0.5) * amp)
+            .addScaledVector(_w, (Math.random() - 0.5) * amp),
+        )
       }
-      for (let c = 0; c < COPIES; c++) {
-        const off = (c - 1) * 0.02
-        for (let s = 0; s < SEGMENTS; s++) {
-          pos.setXYZ(v++, pts[s][0] + off, pts[s][1] - off, 0)
-          pos.setXYZ(v++, pts[s + 1][0] + off, pts[s + 1][1] - off, 0)
+      for (let s = 0; s < SEGMENTS; s++) seg(pts[s], pts[s + 1], 0.024)
+
+      // Forks leave the main bolt at a random point and wander off at an angle.
+      for (let b = 0; b < BRANCHES; b++) {
+        const from = pts[2 + Math.floor(Math.random() * (SEGMENTS - 3))]
+        const bd = new THREE.Vector3().randomDirection().add(_dir).normalize()
+        const bl = len * (0.25 + Math.random() * 0.25)
+        let prev = from
+        for (let s = 1; s <= BRANCH_SEGMENTS; s++) {
+          const t = s / BRANCH_SEGMENTS
+          const next = new THREE.Vector3()
+            .copy(from)
+            .addScaledVector(bd, bl * t)
+            .add(new THREE.Vector3().randomDirection().multiplyScalar(0.12 * bl))
+          seg(prev, next, 0.016)
+          prev = next
         }
       }
     }
-    pos.needsUpdate = true
+    // Unused slots (degenerate segments) collapse to nothing.
+    for (; n < TOTAL; n++) {
+      core.setMatrixAt(n, _m.makeScale(0, 0, 0))
+      glow.setMatrixAt(n, _m.makeScale(0, 0, 0))
+    }
+    core.instanceMatrix.needsUpdate = true
+    glow.instanceMatrix.needsUpdate = true
   })
 
   return (
-    <lineSegments ref={lines} geometry={geometry} frustumCulled={false} visible={false}>
-      <lineBasicMaterial color="#c7d2fe" transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} />
-    </lineSegments>
+    <group ref={root}>
+      <primitive object={built.glow} />
+      <primitive object={built.core} />
+    </group>
   )
 }
 
-/** Compact white-blue core, crackling arcs, fast sparks and a flickering halo. */
+/**
+ * 3D Chidori: hot core in a flickering plasma shell, a glowing spike pointing along the fingers,
+ * forked 3D lightning tubes, and hard sparks. All of it is in the hand's frame, so tilting your
+ * hand swings the spike and bolts with it.
+ */
 export function Chidori({ fx, ctx, quality }: EffectProps) {
   const group = useRef<THREE.Group>(null)
+  const orb = useRef<THREE.Group>(null)
+  const spike = useRef<THREE.Mesh>(null)
+  const shell = useRef<THREE.Mesh>(null)
   const halo = useRef<THREE.Group>(null)
+  const haloB = useRef<THREE.Group>(null)
+  const shellMat = useGlowMaterial('#60a5fa', { power: 1.8, intensity: 1.6, base: 0.15 })
+  const spikeMat = useGlowMaterial('#a5b4fc', { power: 1.4, intensity: 1.4, base: 0.3 })
+  const streak = useGeometry(makeStreakGeometry)
+  // Spike cone: base at the palm, apex out past the fingertips (+Y).
+  const spikeGeo = useGeometry(() => new THREE.ConeGeometry(0.5, 1, 16).translate(0, 0.5, 0))
 
   const sparks = useMemo<ParticleSpec>(
     () => ({
       count: Math.round(120 * quality),
       size: 0.09,
       from: '#ffffff',
-      to: '#6366f1',
-      life: [0.15, 0.4],
-      drag: 1.5,
+      mid: '#7dd3fc',
+      to: '#4f46e5',
+      life: [0.12, 0.4],
+      drag: 1.2,
       spawn: (o, origin) => {
-        const th = Math.random() * Math.PI * 2
-        const sp = 3 + Math.random() * 7
+        const d = new THREE.Vector3().randomDirection().add(ctx.up.clone().multiplyScalar(0.6)).normalize()
+        const sp = 4 + Math.random() * 10
         o.x = origin.x
         o.y = origin.y
         o.z = origin.z
-        o.vx = Math.cos(th) * sp
-        o.vy = Math.sin(th) * sp
-        o.vz = (Math.random() - 0.5) * 2
+        o.vx = d.x * sp
+        o.vy = d.y * sp
+        o.vz = d.z * sp
       },
     }),
-    [quality],
+    [quality, ctx],
   )
 
   useFrame(() => {
@@ -94,22 +194,48 @@ export function Chidori({ fx, ctx, quality }: EffectProps) {
     if (!g) return
     g.visible = k > 0.01
     g.position.copy(ctx.pos)
-    g.scale.setScalar(Math.max(1e-4, 0.42 * fx.handScale * k * (0.9 + Math.random() * 0.25)))
-    // Flicker: random per-frame brightness rather than a smooth pulse.
-    if (halo.current) halo.current.scale.setScalar(0.7 + Math.random() * 0.8)
+    g.quaternion.copy(ctx.quat)
+    g.scale.setScalar(Math.max(1e-4, fx.handScale * k))
+    const flicker = 0.85 + Math.random() * 0.35
+    orb.current?.scale.setScalar(0.42 * flicker)
+    // Spike length jitters hard, like a live arc.
+    spike.current?.scale.set(0.5, (1.6 + Math.random() * 1.2) * (fx.phase === 'released' ? 1.4 : 1), 0.5)
+    shell.current?.scale.setScalar(0.75 * (0.85 + Math.random() * 0.5))
+    shellMat.uniforms.uFade.value = 0.5 + Math.random() * 0.5
+    spikeMat.uniforms.uFade.value = 0.4 + Math.random() * 0.6
+    const flash = Math.random() < 0.08 ? 1.9 : 1
+    halo.current?.scale.setScalar((0.5 + Math.random() * 1.0) * flash)
+    haloB.current?.scale.setScalar(0.6 + Math.random() * 0.9)
   })
 
   return (
     <>
       <group ref={group} visible={false}>
-        <EnergyOrb inner="#ffffff" outer="#818cf8" speed={20} />
+        <group ref={orb}>
+          <EnergyOrb inner="#ffffff" outer="#60a5fa" speed={26} />
+        </group>
+        <mesh ref={shell} material={shellMat}>
+          <sphereGeometry args={[1, 24, 16]} />
+        </mesh>
+        <mesh ref={spike} geometry={spikeGeo} material={spikeMat} />
+        <LightningBolts fx={fx} />
         <group ref={halo}>
-          <Halo color="#a5b4fc" size={9} />
+          <Halo color="#93c5fd" size={4.5} />
+        </group>
+        <group ref={haloB}>
+          <Halo color="#8b5cf6" size={7} />
         </group>
       </group>
-      <Arcs fx={fx} ctx={ctx} />
-      <ParticleField spec={sparks} origin={ctx.pos} emit={() => presence(fx)} />
-      <ImpactFx fx={fx} ctx={ctx} quality={quality} color="#a5b4fc" color2="#ffffff" radius={3.6} duration={0.45} />
+      <MeshParticleField
+        spec={sparks}
+        geometry={streak}
+        origin={ctx.pos}
+        additive
+        orient
+        stretch={0.12}
+        emit={() => presence(fx)}
+      />
+      <ImpactFx fx={fx} ctx={ctx} quality={quality} color="#93c5fd" color2="#ffffff" radius={4.2} duration={0.5} />
     </>
   )
 }
