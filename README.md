@@ -84,6 +84,15 @@ Recognition pipeline:
 3. **Sequence engine** (`sequence.ts`): hold time, flicker grace, cooldown, no repeat while a
    pose is held, timeout, reset, suffix-matching against each jutsu's sequence.
 
+Tracking robustness (`config/tracking.ts`, `features/hand-tracking/`): detection runs once per
+camera frame via `requestVideoFrameCallback` (rAF polling as a fallback) on a 960x540 / up-to-60 fps
+stream; MediaPipe confidence thresholds are lowered to 0.4; a `HandStabilizer` gives each hand a
+persistent id, smooths landmarks with a One Euro filter (heavy smoothing when slow, almost none when
+fast), holds a vanished hand for 160 ms, and holds it for 700 ms if it vanished while overlapping the
+other hand (so a clasp survives MediaPipe merging two hands into one detection). Amber landmarks
+in the overlay mean "held at last pose". Lower thresholds trade more false positives for fewer
+dropped hands; all values are reasoned, not tuned on real footage.
+
 Hand rotation: `pose.ts` derives the palm frame from the landmarks (finger direction =
 wrist→middle knuckle; palm normal from the knuckle line, forced to face the viewer because a
 single camera can't tell palm from back without handedness). The scene smooths it into a

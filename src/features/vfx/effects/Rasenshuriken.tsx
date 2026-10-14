@@ -41,14 +41,17 @@ function makeBladeGeometry(): THREE.BufferGeometry {
   return g
 }
 
+/** Base radius in world units at normal hand scale (was 1.35; now 3x). Raise toward 4.7 (3.5x) if you want it to overflow the stage. */
+const SIZE = 4.0
+
 /** Wind bands: partial 3D tori that spin at different speeds and tilts, like air wrapping the blades. */
 const WIND_BANDS = [
-  { r: 1.3, tube: 0.04, arc: 2.0, speed: 5.5, tilt: 0 },
-  { r: 1.6, tube: 0.03, arc: 1.5, speed: -7.5, tilt: 0 },
-  { r: 1.95, tube: 0.04, arc: 2.4, speed: 4.2, tilt: 0 },
-  { r: 2.3, tube: 0.03, arc: 1.3, speed: -9, tilt: 0 },
-  { r: 1.5, tube: 0.03, arc: 2.1, speed: 6.5, tilt: 1.15 },
-  { r: 1.85, tube: 0.03, arc: 1.7, speed: -5, tilt: -1.0 },
+  { r: 1.3, tube: 0.026, arc: 2.0, speed: 5.5, tilt: 0 },
+  { r: 1.6, tube: 0.0195, arc: 1.5, speed: -7.5, tilt: 0 },
+  { r: 1.95, tube: 0.026, arc: 2.4, speed: 4.2, tilt: 0 },
+  { r: 2.3, tube: 0.0195, arc: 1.3, speed: -9, tilt: 0 },
+  { r: 1.5, tube: 0.0195, arc: 2.1, speed: 6.5, tilt: 1.15 },
+  { r: 1.85, tube: 0.0195, arc: 1.7, speed: -5, tilt: -1.0 },
 ]
 
 /**
@@ -64,7 +67,7 @@ export function Rasenshuriken({ fx, ctx, quality }: EffectProps) {
   const bladesC = useRef<THREE.Mesh>(null)
   const wind = useRef<(THREE.Mesh | null)[]>([])
   const halo = useRef<THREE.Group>(null)
-  const size = useRef(1.35)
+  const size = useRef(SIZE)
 
   const bladeGeo = useGeometry(makeBladeGeometry)
   const streak = useGeometry(makeStreakGeometry)
@@ -77,7 +80,7 @@ export function Rasenshuriken({ fx, ctx, quality }: EffectProps) {
   const gust = useMemo<ParticleSpec>(
     () => ({
       count: Math.round(160 * quality),
-      size: 0.1,
+      size: 0.22,
       from: '#ffffff',
       mid: '#67e8f9',
       to: '#0e7490',
@@ -109,7 +112,7 @@ export function Rasenshuriken({ fx, ctx, quality }: EffectProps) {
     const k = presence(fx)
     const g = group.current
     if (!g) return
-    size.current = 1.35 * fx.handScale * (fx.phase === 'released' ? 1.2 : 1)
+    size.current = SIZE * fx.handScale * (fx.phase === 'released' ? 1.1 : 1)
     g.visible = k > 0.01
     g.position.copy(ctx.pos)
     g.quaternion.copy(ctx.quat)
@@ -149,8 +152,8 @@ export function Rasenshuriken({ fx, ctx, quality }: EffectProps) {
           </mesh>
         ))}
         <group ref={halo}>
-          <Halo color="#22d3ee" size={5} />
-          <Halo color="#0891b2" size={8} />
+          <Halo color="#22d3ee" size={2.2} />
+          <Halo color="#0891b2" size={3.5} />
         </group>
       </group>
       <MeshParticleField
@@ -162,7 +165,7 @@ export function Rasenshuriken({ fx, ctx, quality }: EffectProps) {
         stretch={0.22}
         emit={() => presence(fx)}
       />
-      <ImpactFx fx={fx} ctx={ctx} quality={quality} color="#67e8f9" color2="#ffffff" radius={7} duration={0.85} />
+      <ImpactFx fx={fx} ctx={ctx} quality={quality} color="#67e8f9" color2="#ffffff" radius={14} duration={0.95} />
     </>
   )
 }

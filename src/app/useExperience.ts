@@ -6,10 +6,11 @@ import { handScaleFromSize, imageToDisplay } from '../lib/coords'
 import { playSfx, setMuted } from '../lib/audio'
 import type { CameraApi } from '../features/camera/useCamera'
 import { classifySign } from '../features/gesture-recognition/classify'
-import { extractHandFeatures, type HandFeatures, type Landmark } from '../features/gesture-recognition/features'
+import { extractHandFeatures, type HandFeatures } from '../features/gesture-recognition/features'
 import { IDENTITY_POSE, extractHandPose, poseFromEuler } from '../features/gesture-recognition/pose'
 import { SequenceEngine } from '../features/gesture-recognition/sequence'
 import { createHandTracker, type HandTracker } from '../features/hand-tracking/handTracker'
+import { HandStabilizer, type TrackedHand } from '../features/hand-tracking/stabilizer'
 import { IDLE_STATE, activate, chargeLevel, release, tick, type JutsuPhase, type JutsuState } from '../features/jutsu-system/lifecycle'
 import { deriveStatus, type Mode, type TrackerState, type TrackingStatus } from '../features/jutsu-system/status'
 import type { FxState } from '../features/vfx/shared'
@@ -154,7 +155,10 @@ export function useExperience(opts: Options) {
   useEffect(() => {
     let raf = 0
     let lastVideoTime = -1
-    let lastLandmarks: Landmark[][] = []
+    const stabilizer = new HandStabilizer()
+    let hands: TrackedHand[] = []
+    let pendingDetection = false
+    let lastDetectTs = -1
     let lastSeen = -Infinity
     let lastTs = performance.now()
     let trackCount = 0
@@ -196,6 +200,38 @@ export function useExperience(opts: Options) {
       setLifecycle(release(lifecycle.current, now))
     }
 
+    /** Runs MediaPipe on the current video frame and feeds the stabilizer. */
+    const runDetection = (now: number) => {
+      const o = optsRef.current
+      const tracker = trackerRef.current
+      const video = o.videoRef.current
+      if (o.mode === 'demo' || o.camera.status !== 'ready' || !tracker || !video || video.readyState < 2) return
+      if (now <= lastDetectTs) return // MediaPipe needs strictly increasing timestamps
+      lastDetectTs = now
+      try {
+        stabilizer.update(tracker.detect(video, now), now)
+        pendingDetection = true
+        trackCount++
+      } catch (err) {
+        console.warn('[hand-tracking] detect failed', err)
+      }
+    }
+
+    // Prefer one detection per camera frame (requestVideoFrameCallback): lower latency and no
+    // missed or duplicated frames compared with polling from requestAnimationFrame.
+    type VideoFrameVideo = HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number) => void) => number
+      cancelVideoFrameCallback?: (handle: number) => void
+    }
+    const vfcVideo = optsRef.current.videoRef.current as VideoFrameVideo | null
+    const useVfc = typeof vfcVideo?.requestVideoFrameCallback === 'function'
+    let vfcHandle = 0
+    const onVideoFrame = (now: number) => {
+      vfcHandle = vfcVideo!.requestVideoFrameCallback!(onVideoFrame)
+      runDetection(now)
+    }
+    if (useVfc) vfcHandle = vfcVideo!.requestVideoFrameCallback!(onVideoFrame)
+
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop)
       const o = optsRef.current
@@ -214,17 +250,14 @@ export function useExperience(opts: Options) {
       const video = o.videoRef.current
       const live = o.mode !== 'demo' && o.camera.status === 'ready' && tracker !== null && video !== null
       if (live) {
-        if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+        if (!useVfc && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime
-          try {
-            lastLandmarks = tracker.detect(video, now)
-            newDetection = true
-            trackCount++
-          } catch (err) {
-            console.warn('[hand-tracking] detect failed', err)
-          }
+          runDetection(now)
         }
-        features = lastLandmarks.map((lm) => extractHandFeatures(lm, o.camera.aspect)).filter((f): f is HandFeatures => f !== null)
+        newDetection = pendingDetection
+        pendingDetection = false
+        hands = stabilizer.hands(now)
+        features = hands.map((h) => extractHandFeatures(h.landmarks, o.camera.aspect)).filter((f): f is HandFeatures => f !== null)
         handsCount = features.length
         const res = classifySign(features, o.camera.aspect)
         inputSign = res?.sign ?? null
@@ -240,7 +273,7 @@ export function useExperience(opts: Options) {
           fx.anchor.x = d.x
           fx.anchor.y = d.y
           handScale += (handScaleFromSize(features[0].handSize) - handScale) * Math.min(1, dtSec * 6)
-          const pose = extractHandPose(lastLandmarks[0], o.camera.aspect)
+          const pose = extractHandPose(hands[0].landmarks, o.camera.aspect)
           if (pose) {
             Object.assign(fx.handUp, pose.up)
             Object.assign(fx.handNormal, pose.normal)
@@ -252,6 +285,10 @@ export function useExperience(opts: Options) {
           }
         }
       } else if (o.mode === 'demo') {
+        if (hands.length) {
+          hands = []
+          stabilizer.reset()
+        }
         fx.anchor.x = demoAnchor.current.x
         fx.anchor.y = demoAnchor.current.y
         fx.handScale = 1
@@ -341,13 +378,15 @@ export function useExperience(opts: Options) {
         }
         const g = cv.getContext('2d')
         if (g) {
-          const draw = live && o.settings.showLandmarks && lastLandmarks.length > 0
+          const draw = live && o.settings.showLandmarks && hands.length > 0
           if (draw || drewOverlay) g.clearRect(0, 0, w, h)
           drewOverlay = draw
           if (draw) {
             g.lineWidth = 2 * dpr
-            for (const lm of lastLandmarks) {
-              g.strokeStyle = 'rgba(56,189,248,0.85)'
+            for (const hand of hands) {
+              const lm = hand.landmarks
+              // Amber = held at last pose (no detection this frame).
+              g.strokeStyle = hand.coasting ? 'rgba(251,191,36,0.7)' : 'rgba(56,189,248,0.85)'
               g.beginPath()
               for (const { start, end } of HandLandmarker.HAND_CONNECTIONS) {
                 g.moveTo((1 - lm[start].x) * w, lm[start].y * h)
@@ -418,7 +457,10 @@ export function useExperience(opts: Options) {
     }
 
     raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      if (useVfc) vfcVideo!.cancelVideoFrameCallback?.(vfcHandle)
+    }
     // The loop reads everything else through refs.
   }, [])
 

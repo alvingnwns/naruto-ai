@@ -1,4 +1,5 @@
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+import { TRACKING } from '../../config/tracking'
 import type { Landmark } from '../gesture-recognition/features'
 
 export interface HandTracker {
@@ -19,6 +20,9 @@ export async function createHandTracker(): Promise<HandTracker> {
       baseOptions: { modelAssetPath: `${base}models/hand_landmarker.task`, delegate },
       runningMode: 'VIDEO',
       numHands: 2,
+      minHandDetectionConfidence: TRACKING.detectionConfidence,
+      minHandPresenceConfidence: TRACKING.presenceConfidence,
+      minTrackingConfidence: TRACKING.trackingConfidence,
     })
 
   let landmarker: HandLandmarker

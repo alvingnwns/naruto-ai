@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { TRACKING } from '../../config/tracking'
 
 export type CameraStatus = 'off' | 'starting' | 'ready' | 'denied' | 'unavailable' | 'error'
 
@@ -60,7 +61,12 @@ export function useCamera(videoRef: React.RefObject<HTMLVideoElement | null>): C
     setMessage(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        video: {
+          width: { ideal: TRACKING.camera.width },
+          height: { ideal: TRACKING.camera.height },
+          frameRate: { ideal: TRACKING.camera.frameRate },
+          facingMode: 'user',
+        },
         audio: false,
       })
       if (gen !== generation.current) {
