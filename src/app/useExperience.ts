@@ -385,15 +385,15 @@ export function useExperience(opts: Options) {
             g.lineWidth = 2 * dpr
             for (const hand of hands) {
               const lm = hand.landmarks
-              // Amber = held at last pose (no detection this frame).
-              g.strokeStyle = hand.coasting ? 'rgba(251,191,36,0.7)' : 'rgba(56,189,248,0.85)'
+              // Red-orange = held at last pose (no detection this frame); gold = live.
+              g.strokeStyle = hand.coasting ? 'rgba(255,90,40,0.7)' : 'rgba(255,205,60,0.9)'
               g.beginPath()
               for (const { start, end } of HandLandmarker.HAND_CONNECTIONS) {
                 g.moveTo((1 - lm[start].x) * w, lm[start].y * h)
                 g.lineTo((1 - lm[end].x) * w, lm[end].y * h)
               }
               g.stroke()
-              g.fillStyle = '#e0f2fe'
+              g.fillStyle = '#fff4cc'
               for (const p of lm) {
                 g.beginPath()
                 g.arc((1 - p.x) * w, p.y * h, 3 * dpr, 0, Math.PI * 2)

@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { JUTSU_BY_ID, type JutsuId } from '../config/jutsu'
+import { type JutsuId } from '../config/jutsu'
 import { RECOGNITION } from '../config/signs'
+import { TomoeEmblem } from '../components/Brand'
 import { ControlPanel } from '../components/ControlPanel'
 import { Stage } from '../components/Stage'
 import { useCamera } from '../features/camera/useCamera'
 import type { Mode } from '../features/jutsu-system/status'
 import { useExperience, type Settings } from './useExperience'
 
-const MODES: { id: Mode; label: string }[] = [
-  { id: 'practice', label: 'PRACTICE' },
-  { id: 'freeplay', label: 'FREE-PLAY' },
-  { id: 'demo', label: 'DEMO' },
+const MODES: { id: Mode; label: string; jp: string }[] = [
+  { id: 'practice', label: 'PRACTICE', jp: '修行' },
+  { id: 'freeplay', label: 'FREE-PLAY', jp: '自由' },
+  { id: 'demo', label: 'DEMO', jp: '見本' },
 ]
 
 const prefersReducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -59,37 +60,41 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [releaseJutsu, resetSequence])
 
-  const accent = JUTSU_BY_ID[selected].accent
-
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-(--color-line) px-5 py-3">
-        <div className="flex items-baseline gap-3">
-          <h1 className="font-display text-3xl font-semibold tracking-[0.12em]" style={{ textShadow: `0 0 18px ${accent}66` }}>
-            HAND SIGN <span style={{ color: accent }}>JUTSU</span>
-          </h1>
-          <span className="hidden text-sm text-slate-400 sm:inline">印 · real-time hand tracking</span>
+      <header className="relative flex flex-wrap items-center justify-between gap-4 border-b border-(--color-line) bg-black/40 px-5 py-3">
+        {/* flame-coloured underline */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-linear-to-r from-transparent via-gold to-transparent opacity-70" />
+        <div className="flex items-center gap-3">
+          <TomoeEmblem />
+          <div>
+            <h1 className="font-brush text-3xl leading-none tracking-wide">
+              <span className="text-white [text-shadow:0_2px_0_#000]">HAND SIGN </span>
+              <span className="bg-linear-to-b from-[#fff2a8] via-gold to-[#ff7a00] bg-clip-text text-transparent [filter:drop-shadow(0_0_10px_rgba(255,140,0,0.65))]">
+                JUTSU
+              </span>
+            </h1>
+            <div className="mt-1 hidden font-display text-[11px] tracking-[0.35em] text-chakra sm:block">
+              九尾チャクラモード · NINE-TAILS CHAKRA MODE
+            </div>
+          </div>
         </div>
-        <nav className="flex gap-1" aria-label="Mode">
+        <nav className="flex gap-2" aria-label="Mode">
           {MODES.map((m) => (
             <button
               key={m.id}
               onClick={() => changeMode(m.id)}
               aria-pressed={mode === m.id}
-              className="rounded-sm border px-4 py-1.5 font-display text-sm tracking-[0.18em] transition-colors"
-              style={{
-                borderColor: mode === m.id ? accent : 'var(--color-line)',
-                color: mode === m.id ? accent : '#94a3b8',
-                background: mode === m.id ? `${accent}14` : 'transparent',
-              }}
+              className="btn btn-ghost btn-tab flex items-baseline gap-1.5 text-sm"
             >
-              {m.label}
+              <span className="font-brush text-xs opacity-80">{m.jp}</span>
+              <span>{m.label}</span>
             </button>
           ))}
         </nav>
       </header>
 
-      <main className="grid flex-1 gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <main className="grid flex-1 gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_350px]">
         <Stage
           mode={mode}
           selected={selected}

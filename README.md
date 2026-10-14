@@ -59,6 +59,14 @@ the canonical interlocking seals, and the sequences are demo combinations, not l
 Both tables live in `src/config/signs.ts` and `src/config/jutsu.ts`; edit them to change
 poses, thresholds, hold time, or combinations.
 
+## Look and feel
+
+UI is themed on Nine-Tails (Kurama) Chakra Mode: golden-orange chakra on sumi-ink black,
+flame-red edges, angular cut panels, brush lettering (Reggae One, self-hosted via @fontsource),
+a tomoe emblem, whisker-mark section headings, a circulating chakra-flame stage border, drifting
+embers, and radiating speed lines behind the jutsu name. Palette and tokens live in
+`src/index.css`; there is no official colour spec, so it is an artistic interpretation.
+
 ## Architecture
 
 ```
