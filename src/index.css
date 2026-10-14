@@ -1,0 +1,77 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/oswald';
+
+@theme {
+  --font-display: 'Oswald Variable', 'Arial Narrow', Impact, sans-serif;
+  --color-ink: #05070d;
+  --color-panel: #090e1a;
+  --color-line: rgba(125, 165, 255, 0.16);
+  --color-chakra: #38bdf8;
+  --color-fire: #fb923c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: #dbe6ff;
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  /* Atmosphere: two soft glows and a faint technical grid. */
+  background-image:
+    radial-gradient(60rem 30rem at 15% -10%, rgba(56, 189, 248, 0.1), transparent 60%),
+    radial-gradient(50rem 30rem at 100% 110%, rgba(251, 146, 60, 0.07), transparent 60%),
+    linear-gradient(rgba(125, 165, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 165, 255, 0.035) 1px, transparent 1px);
+  background-size: auto, auto, 36px 36px, 36px 36px;
+}
+
+.panel {
+  background: color-mix(in srgb, var(--color-panel) 92%, transparent);
+  border: 1px solid var(--color-line);
+}
+
+/* Corner ticks give the stage a targeting-reticle feel without adding DOM. */
+.hud-frame {
+  background:
+    linear-gradient(var(--color-chakra), var(--color-chakra)) top left / 18px 2px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) top left / 2px 18px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) top right / 18px 2px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) top right / 2px 18px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) bottom left / 18px 2px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) bottom left / 2px 18px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) bottom right / 18px 2px no-repeat,
+    linear-gradient(var(--color-chakra), var(--color-chakra)) bottom right / 2px 18px no-repeat;
+}
+
+@keyframes jutsu-flash {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  15% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.jutsu-flash {
+  animation: jutsu-flash 1.8s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jutsu-flash {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
